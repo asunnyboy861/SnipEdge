@@ -40,7 +40,8 @@ enum VisionCaptureService {
 
             let observations = request.results ?? []
             var texts: [String] = []
-            var ticks: [(pixel: Double, value: Double)] = []
+            var rightTicks: [(pixel: Double, value: Double)] = []
+            var leftTicks: [(pixel: Double, value: Double)] = []
 
             for observation in observations {
                 guard let candidate = observation.topCandidates(1).first else { continue }
@@ -49,12 +50,18 @@ enum VisionCaptureService {
                 let box = observation.boundingBox
                 let midY = 1 - (box.origin.y + box.height / 2)
                 let midX = box.origin.x + box.width / 2
-                guard midX > 0.72 || midX < 0.28 else { continue }
-                if let value = parseNumber(text) {
-                    ticks.append((midY * height, value))
+                if midX > 0.72 {
+                    if let value = parseNumber(text) {
+                        rightTicks.append((midY * height, value))
+                    }
+                } else if midX < 0.28 {
+                    if let value = parseNumber(text) {
+                        leftTicks.append((midY * height, value))
+                    }
                 }
             }
 
+            let ticks = rightTicks.count >= leftTicks.count ? rightTicks : leftTicks
             let timeframe = guessTimeframe(texts)
             let symbol = guessSymbol(texts)
             let calibration = calibrate(ticks: ticks, imageHeight: height)
@@ -68,11 +75,11 @@ enum VisionCaptureService {
         cleaned = cleaned.replacingOccurrences(of: ",", with: "")
         cleaned = cleaned.replacingOccurrences(of: "%", with: "")
         cleaned = cleaned.replacingOccurrences(of: "$", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "-", with: "")
         cleaned = cleaned.replacingOccurrences(of: "k", with: "000", options: .caseInsensitive)
-        cleaned = cleaned.replacingOccurrences(of: "K", with: "000")
         var digits = ""
         for character in cleaned {
-            if character.isNumber || character == "." || character == "-" {
+            if character.isNumber || character == "." {
                 digits.append(character)
             }
         }
@@ -113,16 +120,21 @@ enum VisionCaptureService {
 
     static func calibrate(ticks: [(pixel: Double, value: Double)], imageHeight: Double) -> AxisCalibration {
         guard ticks.count >= 2 else { return .unavailable }
-        let uniqueValues = Set(ticks.map { String(format: "%.2f", $0.value) })
+        let sortedValues = ticks.map(\.value).sorted()
+        let medianValue = sortedValues[sortedValues.count / 2]
+        guard medianValue > 0 else { return .unavailable }
+        let filtered = ticks.filter { abs($0.value - medianValue) / medianValue < 0.6 }
+        guard filtered.count >= 2 else { return .unavailable }
+        let uniqueValues = Set(filtered.map { String(format: "%.2f", $0.value) })
         guard uniqueValues.count >= 2 else { return .unavailable }
 
-        let xs = ticks.map(\.pixel)
-        let ys = ticks.map(\.value)
+        let xs = filtered.map(\.pixel)
+        let ys = filtered.map(\.value)
         let meanX = xs.reduce(0, +) / Double(xs.count)
         let meanY = ys.reduce(0, +) / Double(ys.count)
         var numerator = 0.0
         var denominator = 0.0
-        for index in 0 ..< ticks.count {
+        for index in 0 ..< filtered.count {
             numerator += (xs[index] - meanX) * (ys[index] - meanY)
             denominator += (xs[index] - meanX) * (xs[index] - meanX)
         }
@@ -133,7 +145,7 @@ enum VisionCaptureService {
 
         var totalVariation = 0.0
         var residual = 0.0
-        for index in 0 ..< ticks.count {
+        for index in 0 ..< filtered.count {
             totalVariation += (ys[index] - meanY) * (ys[index] - meanY)
             let predicted = slope * xs[index] + intercept
             residual += (ys[index] - predicted) * (ys[index] - predicted)
@@ -142,6 +154,6 @@ enum VisionCaptureService {
         let confidence = min(max(rSquared, 0), 1)
         guard confidence > 0.2 else { return .unavailable }
 
-        return AxisCalibration(pixelToPrice: slope, confidence: confidence, tickCount: ticks.count, intercept: intercept)
+        return AxisCalibration(pixelToPrice: slope, confidence: confidence, tickCount: filtered.count, intercept: intercept)
     }
 }

@@ -126,8 +126,9 @@ struct HeuristicChartReader: ChartVisionClient {
 
         guard !topRows.isEmpty, !bottomRows.isEmpty else { throw ChartVisionError.invalidResponse }
 
-        let supportY = median(bottomRows)
-        let resistanceY = median(topRows)
+        let pixelScale = Double(cgImage.height) / Double(height)
+        let supportY = median(bottomRows) * pixelScale
+        let resistanceY = median(topRows) * pixelScale
 
         let third = max(centroids.count / 3, 1)
         let firstAvg = centroids.prefix(third).reduce(0, +) / Double(third)
