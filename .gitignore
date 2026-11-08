@@ -1,0 +1,11 @@
+.DS_Store
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+*.log
+GLMProxySecret.txt
+.env
+keytext*.md
+COMPETITOR_REPORT.md
+app_audit*.md
